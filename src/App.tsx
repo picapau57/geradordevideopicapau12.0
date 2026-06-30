@@ -31,15 +31,23 @@ const STYLES: Record<string, StyleConfig> = {
 };
 
 const VOICES: VoiceConfig[] = [
-  { id: "nova", name: "Nova", gender: "Feminina", desc: "Clara, energética e expressiva" },
-  { id: "shimmer", name: "Shimmer", gender: "Feminina", desc: "Suave, calma e acolhedora" },
-  { id: "alloy", name: "Alloy", gender: "Neutra", desc: "Equilibrada, profissional e limpa" },
-  { id: "echo", name: "Echo", gender: "Masculina", desc: "Firme, confiável e ponderada" },
-  { id: "fable", name: "Fable", gender: "Neutra", desc: "Narrativa, misteriosa e artística" },
-  { id: "onyx", name: "Onyx", gender: "Masculina", desc: "Grave, profunda e autoritária" },
-  { id: "ash", name: "Ash", gender: "Masculina", desc: "Jovem, amigável e casual" },
-  { id: "coral", name: "Coral", gender: "Feminina", desc: "Jovem, animada e calorosa" },
-  { id: "sage", name: "Sage", gender: "Neutra", desc: "Sussurrada, calorosa e intimista" }
+  // 5 Feminine Voices
+  { id: "nova", name: "Nova (Ana)", gender: "Feminina", desc: "Clara, energética e expressiva" },
+  { id: "shimmer", name: "Shimmer (Camila)", gender: "Feminina", desc: "Suave, calma e acolhedora" },
+  { id: "coral", name: "Coral (Helena)", gender: "Feminina", desc: "Voz jovem, alegre e dinâmica" },
+  { id: "melody", name: "Melody (Isabela)", gender: "Feminina", desc: "Voz doce, carismática e suave" },
+  { id: "stella", name: "Stella (Letícia)", gender: "Feminina", desc: "Voz sofisticada, pausada e elegante" },
+
+  // 5 Masculine Voices
+  { id: "echo", name: "Echo (Bruno)", gender: "Masculina", desc: "Firme, confiável e ponderada" },
+  { id: "onyx", name: "Onyx (Ronaldo)", gender: "Masculina", desc: "Grave, profunda e autoritária" },
+  { id: "ash", name: "Ash (Gabriel)", gender: "Masculina", desc: "Jovem, amigável e casual" },
+  { id: "cove", name: "Cove (Lucas)", gender: "Masculina", desc: "Voz calorosa, calma e acolhedora" },
+  { id: "breeze", name: "Breeze (Mateus)", gender: "Masculina", desc: "Voz enérgica, forte e motivadora" },
+
+  // 2 Neutral Voices
+  { id: "alloy", name: "Alloy (Alex)", gender: "Neutra", desc: "Equilibrada, profissional e limpa" },
+  { id: "fable", name: "Fable (Jean)", gender: "Neutra", desc: "Narrativa, misteriosa e artística" }
 ];
 
 export default function App() {
@@ -77,8 +85,8 @@ export default function App() {
   // Timings and subtitle settings
   const [seed, setSeed] = useState(42);
   const [minDuration, setMinDuration] = useState(35); // in seconds
-  const [pauseBetween, setPauseBetween] = useState(1.5); // seconds
-  const [transitionDuration, setTransitionDuration] = useState(0.7); // seconds
+  const [pauseBetween, setPauseBetween] = useState(0.6); // seconds
+  const [transitionDuration, setTransitionDuration] = useState(0.4); // seconds
   const [karaoke, setKaraoke] = useState(true);
   const [transitionType, setTransitionType] = useState("auto"); // auto, fade, slide, wipe, zoom
   
@@ -354,12 +362,38 @@ export default function App() {
 
   // ============ TTS API CALL & JSON EXTRACTOR ============
   const generateTTS = async (text: string, voice: string, emo: string): Promise<{ blob: Blob; method: string }> => {
+    // Resolve custom voices to standard OpenAI voice IDs and inject vocal style prefixes
+    let finalVoice = voice;
+    let extraEmo = "";
+    
+    if (voice === "coral") {
+      finalVoice = "shimmer";
+      extraEmo = "[com voz jovem, alegre e entusiasmada]";
+    } else if (voice === "melody") {
+      finalVoice = "nova";
+      extraEmo = "[com voz doce, carismática e suave]";
+    } else if (voice === "stella") {
+      finalVoice = "shimmer";
+      extraEmo = "[com voz sofisticada, pausada e elegante]";
+    } else if (voice === "ash") {
+      finalVoice = "echo";
+      extraEmo = "[com voz jovem, casual e amigável]";
+    } else if (voice === "cove") {
+      finalVoice = "onyx";
+      extraEmo = "[com voz calorosa, calma e acolhedora]";
+    } else if (voice === "breeze") {
+      finalVoice = "echo";
+      extraEmo = "[com voz enérgica, forte e motivadora]";
+    }
+
+    const combinedEmo = emo ? (extraEmo ? `${extraEmo} ${emo}` : emo) : extraEmo;
+
     // Tenta primeiro através do Proxy do Servidor (/api/tts) para evitar problemas de CORS no Render/Vercel
     try {
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice, emo })
+        body: JSON.stringify({ text, voice: finalVoice, emo: combinedEmo })
       });
 
       if (response.ok) {
@@ -374,7 +408,7 @@ export default function App() {
       console.warn("[TTS Client] Falha ao conectar ao Proxy do Servidor. Tentando chamada client-side direta...", err);
     }
 
-    const fullText = emo ? `${emo} ${text}` : text;
+    const fullText = combinedEmo ? `${combinedEmo} ${text}` : text;
     
     // Método de Fallback Direto Client-Side 1: Try openai-audio via POST
     try {
@@ -384,7 +418,7 @@ export default function App() {
         body: JSON.stringify({
           messages: [{ role: "user", content: fullText }],
           model: "openai-audio",
-          voice: voice,
+          voice: finalVoice,
           response_modalities: ["audio"]
         })
       });
@@ -421,7 +455,7 @@ export default function App() {
 
     // Método de Fallback Direto Client-Side 2: GET fallback com model=openai
     try {
-      const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${voice}`;
+      const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${finalVoice}`;
       const response = await fetch(url);
       if (response.ok) {
         const responseBlob = await response.blob();
@@ -1335,6 +1369,121 @@ export default function App() {
           {/* CONFIGURATION SIDEBAR: 5 COLS */}
           <div className="lg:col-span-5 flex flex-col gap-6">
             
+            {/* QUICK SETTINGS CONTROLS PANEL */}
+            <div className="bg-[#0A0C10] border border-[#1E293B] p-5 rounded-2xl flex flex-col gap-4 shadow-xl">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 className="font-display font-bold text-sm text-blue-400 flex items-center gap-2">
+                  <Settings className="w-4 h-4 animate-spin-slow" />
+                  Painel de Controle Rápido
+                </h3>
+                <span className="text-[10px] text-slate-500 bg-slate-900 px-2 py-0.5 rounded-full border border-slate-800 font-mono uppercase">
+                  Ajustes Ativos
+                </span>
+              </div>
+
+              {/* Grid with Format and Voice */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Format selection */}
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1.5 font-bold uppercase tracking-wider">Formato do Vídeo</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setFormat("9:16")}
+                      className={`flex-1 py-2 px-2 rounded-lg border text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${format === "9:16" ? "border-blue-500 bg-blue-600/20 text-blue-300" : "border-[#334155] bg-[#1A1D24] text-slate-400 hover:text-white"}`}
+                    >
+                      <Smartphone className="w-3.5 h-3.5" />
+                      9:16 (Shorts)
+                    </button>
+                    <button
+                      onClick={() => setFormat("16:9")}
+                      className={`flex-1 py-2 px-2 rounded-lg border text-[11px] font-bold transition flex items-center justify-center gap-1.5 ${format === "16:9" ? "border-blue-500 bg-blue-600/20 text-blue-300" : "border-[#334155] bg-[#1A1D24] text-slate-400 hover:text-white"}`}
+                    >
+                      <Tv className="w-3.5 h-3.5" />
+                      16:9 (YouTube)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Voice Selection */}
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1.5 font-bold uppercase tracking-wider">Voz do Narrador</label>
+                  <select
+                    value={ttsVoice}
+                    onChange={(e) => setTtsVoice(e.target.value)}
+                    className="w-full bg-[#1A1D24] border border-[#334155] rounded-lg p-2 text-xs font-semibold text-white focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  >
+                    <optgroup label="♀️ Vozes Femininas" className="bg-[#1A1D24] text-pink-400">
+                      {VOICES.filter(v => v.gender === "Feminina").map((v) => (
+                        <option key={v.id} value={v.id} className="text-white">
+                          🗣️ {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="♂️ Vozes Masculinas" className="bg-[#1A1D24] text-blue-400">
+                      {VOICES.filter(v => v.gender === "Masculina").map((v) => (
+                        <option key={v.id} value={v.id} className="text-white">
+                          🗣️ {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="⚧️ Vozes Neutras" className="bg-[#1A1D24] text-teal-400">
+                      {VOICES.filter(v => v.gender === "Neutra").map((v) => (
+                        <option key={v.id} value={v.id} className="text-white">
+                          🗣️ {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+              </div>
+
+              {/* Rhythm Control (Pause between scenes) */}
+              <div className="bg-[#1A1D24] border border-[#334155]/60 p-3 rounded-xl flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Ritmo de Transição (Pausa)</label>
+                  <span className="text-xs font-bold font-mono text-blue-400">{pauseBetween}s</span>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="2.5"
+                    step="0.1"
+                    value={pauseBetween}
+                    onChange={(e) => setPauseBetween(Number(e.target.value))}
+                    className="w-full sm:flex-1 h-1.5 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => setPauseBetween(0.4)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${pauseBetween === 0.4 ? "bg-blue-600 text-white" : "bg-slate-900 text-slate-400 hover:text-white"}`}
+                      title="Transições rápidas entre cenas"
+                    >
+                      Rápido (0.4s)
+                    </button>
+                    <button
+                      onClick={() => setPauseBetween(0.6)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${pauseBetween === 0.6 ? "bg-blue-600 text-white" : "bg-slate-900 text-slate-400 hover:text-white"}`}
+                      title="Equilibrado"
+                    >
+                      Padrão (0.6s)
+                    </button>
+                    <button
+                      onClick={() => setPauseBetween(1.2)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${pauseBetween === 1.2 ? "bg-blue-600 text-white" : "bg-slate-900 text-slate-400 hover:text-white"}`}
+                      title="Transição lenta"
+                    >
+                      Suave (1.2s)
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Ajusta o tempo de silêncio entre o final de uma cena e o início da próxima. Menor tempo torna o vídeo mais dinâmico.
+                </p>
+              </div>
+            </div>
+
             {/* TABS SELECTOR */}
             <div className="bg-[#0A0C10] border border-[#1E293B] p-1.5 rounded-xl flex gap-1">
               <button 

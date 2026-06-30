@@ -108,8 +108,34 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
         return res.status(400).json({ error: "Falta o parâmetro text" });
       }
 
-      const fullText = emo ? `${emo} ${text}` : text;
-      console.log(`[TTS Proxy] Iniciando para: "${fullText.substring(0, 40)}..." | Voz: ${voice || 'default'}`);
+      // Resolve custom voices to standard OpenAI voice IDs and inject vocal style prefixes
+      let finalVoice = voice || "nova";
+      let extraEmo = "";
+      
+      if (voice === "coral") {
+        finalVoice = "shimmer";
+        extraEmo = "[com voz jovem, alegre e entusiasmada]";
+      } else if (voice === "melody") {
+        finalVoice = "nova";
+        extraEmo = "[com voz doce, carismática e suave]";
+      } else if (voice === "stella") {
+        finalVoice = "shimmer";
+        extraEmo = "[com voz sofisticada, pausada e elegante]";
+      } else if (voice === "ash") {
+        finalVoice = "echo";
+        extraEmo = "[com voz jovem, casual e amigável]";
+      } else if (voice === "cove") {
+        finalVoice = "onyx";
+        extraEmo = "[com voz calorosa, calma e acolhedora]";
+      } else if (voice === "breeze") {
+        finalVoice = "echo";
+        extraEmo = "[com voz enérgica, forte e motivadora]";
+      }
+
+      const combinedEmo = emo ? (extraEmo ? `${extraEmo} ${emo}` : emo) : extraEmo;
+      const fullText = combinedEmo ? `${combinedEmo} ${text}` : text;
+
+      console.log(`[TTS Proxy] Iniciando para: "${fullText.substring(0, 40)}..." | Voz: ${finalVoice}`);
 
       // Método 1: POST para text.pollinations.ai/openai com model: openai-audio
       try {
@@ -119,7 +145,7 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
           body: JSON.stringify({
             messages: [{ role: "user", content: fullText }],
             model: "openai-audio",
-            voice: voice || "nova",
+            voice: finalVoice,
             response_modalities: ["audio"]
           })
         });
@@ -155,7 +181,7 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
 
       // Método 2: GET fallback com model: openai-audio
       try {
-        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai-audio&voice=${voice || "nova"}`;
+        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai-audio&voice=${finalVoice}`;
         console.log(`[TTS Proxy] Tentando GET fallback: ${url.substring(0, 80)}...`);
         const response = await fetch(url);
         if (response.ok) {
@@ -189,7 +215,7 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
 
       // Método 3: GET fallback com model: openai (caso o openai-audio de GET retorne 404)
       try {
-        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${voice || "nova"}`;
+        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${finalVoice}`;
         console.log(`[TTS Proxy] Tentando GET alternativa (model=openai): ${url.substring(0, 80)}...`);
         const response = await fetch(url);
         if (response.ok) {
