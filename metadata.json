@@ -1,0 +1,6 @@
+{
+  "name": "Gerador de Vídeos Pica-Pau",
+  "description": "Gerador de vídeos automático com inteligência artificial para redes sociais, Shorts e YouTube.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
