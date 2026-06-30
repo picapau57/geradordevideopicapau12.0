@@ -354,9 +354,29 @@ export default function App() {
 
   // ============ TTS API CALL & JSON EXTRACTOR ============
   const generateTTS = async (text: string, voice: string, emo: string): Promise<{ blob: Blob; method: string }> => {
+    // Tenta primeiro através do Proxy do Servidor (/api/tts) para evitar problemas de CORS no Render/Vercel
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice, emo })
+      });
+
+      if (response.ok) {
+        const responseBlob = await response.blob();
+        const method = response.headers.get("X-TTS-Method") || "Proxy do Servidor (Sucesso)";
+        return { blob: responseBlob, method };
+      } else {
+        const errorText = await response.text();
+        console.warn(`[TTS Client] Proxy do servidor retornou erro ${response.status}: ${errorText}`);
+      }
+    } catch (err: any) {
+      console.warn("[TTS Client] Falha ao conectar ao Proxy do Servidor. Tentando chamada client-side direta...", err);
+    }
+
     const fullText = emo ? `${emo} ${text}` : text;
     
-    // Method 1: Try openai-audio via POST
+    // Método de Fallback Direto Client-Side 1: Try openai-audio via POST
     try {
       const response = await fetch("https://text.pollinations.ai/openai", {
         method: "POST",
@@ -369,75 +389,62 @@ export default function App() {
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP status ${response.status}`);
-      }
-
-      // Read response as text first to check if it's JSON or raw binary
-      const responseText = await response.text();
-      const cleaned = responseText.trim();
-      
-      if (cleaned.startsWith("{")) {
-        // It's an OpenAI JSON response containing base64 audio!
-        const parsed = JSON.parse(cleaned);
-        // Find base64 audio string under usual OpenAI paths
-        const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio || parsed.choices?.[0]?.message?.content;
+      if (response.ok) {
+        const responseText = await response.text();
+        const cleaned = responseText.trim();
         
-        if (!base64Audio) {
-          throw new Error("JSON response does not contain any audio data field.");
-        }
-
-        // Decode base64 to binary ArrayBuffer and create Blob
-        const binStr = window.atob(base64Audio);
-        const bytes = new Uint8Array(binStr.length);
-        for (let i = 0; i < binStr.length; i++) {
-          bytes[i] = binStr.charCodeAt(i);
-        }
-        
-        const blob = new Blob([bytes.buffer], { type: "audio/mp3" });
-        return { blob, method: "Pollinations POST (Base64 JSON)" };
-      } else {
-        // It's raw binary payload
-        const binaryBytes = new Uint8Array(responseText.length);
-        for (let i = 0; i < responseText.length; i++) {
-          binaryBytes[i] = responseText.charCodeAt(i);
-        }
-        const blob = new Blob([binaryBytes.buffer], { type: "audio/mp3" });
-        return { blob, method: "Pollinations POST (Raw Binary)" };
-      }
-    } catch (err: any) {
-      // POST failed, we will silently try the GET fallback method next
-      console.warn("POST de voz falhou. Tentando método GET de fallback...", err);
-    }
-
-    // Method 2: GET fallback
-    try {
-      const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai-audio&voice=${voice}`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`GET HTTP error ${response.status}`);
-      }
-      const responseBlob = await response.blob();
-      
-      // Safety check: is it JSON text inside a blob?
-      const textVal = await responseBlob.text();
-      if (textVal.trim().startsWith("{")) {
-        const parsed = JSON.parse(textVal);
-        const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
-        if (base64Audio) {
-          const binStr = window.atob(base64Audio);
-          const bytes = new Uint8Array(binStr.length);
-          for (let i = 0; i < binStr.length; i++) {
-            bytes[i] = binStr.charCodeAt(i);
+        if (cleaned.startsWith("{")) {
+          const parsed = JSON.parse(cleaned);
+          const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio || parsed.choices?.[0]?.message?.content;
+          
+          if (base64Audio) {
+            const binStr = window.atob(base64Audio);
+            const bytes = new Uint8Array(binStr.length);
+            for (let i = 0; i < binStr.length; i++) {
+              bytes[i] = binStr.charCodeAt(i);
+            }
+            const blob = new Blob([bytes.buffer], { type: "audio/mp3" });
+            return { blob, method: "Pollinations POST Direto (Base64 JSON)" };
           }
-          return { blob: new Blob([bytes.buffer], { type: "audio/mp3" }), method: "Pollinations GET (Base64 JSON)" };
+        } else {
+          const binaryBytes = new Uint8Array(responseText.length);
+          for (let i = 0; i < responseText.length; i++) {
+            binaryBytes[i] = responseText.charCodeAt(i);
+          }
+          const blob = new Blob([binaryBytes.buffer], { type: "audio/mp3" });
+          return { blob, method: "Pollinations POST Direto (Raw Binary)" };
         }
       }
-      
-      return { blob: responseBlob, method: "Pollinations GET (Raw Blob)" };
     } catch (err: any) {
-      throw new Error(`Ambos os métodos de TTS falharam. Erro final: ${err.message}`);
+      console.warn("Fallback client-side POST falhou:", err);
     }
+
+    // Método de Fallback Direto Client-Side 2: GET fallback com model=openai
+    try {
+      const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${voice}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const responseBlob = await response.blob();
+        const textVal = await responseBlob.text();
+        if (textVal.trim().startsWith("{")) {
+          const parsed = JSON.parse(textVal);
+          const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
+          if (base64Audio) {
+            const binStr = window.atob(base64Audio);
+            const bytes = new Uint8Array(binStr.length);
+            for (let i = 0; i < binStr.length; i++) {
+              bytes[i] = binStr.charCodeAt(i);
+            }
+            return { blob: new Blob([bytes.buffer], { type: "audio/mp3" }), method: "Pollinations GET Direto (Base64 JSON)" };
+          }
+        }
+        return { blob: responseBlob, method: "Pollinations GET Direto (Raw Blob)" };
+      }
+    } catch (err: any) {
+      throw new Error(`Ambos os métodos de TTS (Proxy e Chamada Direta) falharam. Erro final: ${err.message}`);
+    }
+
+    throw new Error("Não foi possível gerar a locução de voz.");
   };
 
   // Precise audio decoding and duration fetching using client-side AudioContext

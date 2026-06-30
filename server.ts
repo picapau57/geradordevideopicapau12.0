@@ -100,6 +100,134 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
     }
   });
 
+  // Proxy Route for text-to-speech (TTS) to prevent CORS and 404/network blocks on hosting platforms like Render
+  app.post("/api/tts", async (req, res) => {
+    try {
+      const { text, voice, emo } = req.body;
+      if (!text) {
+        return res.status(400).json({ error: "Falta o parâmetro text" });
+      }
+
+      const fullText = emo ? `${emo} ${text}` : text;
+      console.log(`[TTS Proxy] Iniciando para: "${fullText.substring(0, 40)}..." | Voz: ${voice || 'default'}`);
+
+      // Método 1: POST para text.pollinations.ai/openai com model: openai-audio
+      try {
+        const response = await fetch("https://text.pollinations.ai/openai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: fullText }],
+            model: "openai-audio",
+            voice: voice || "nova",
+            response_modalities: ["audio"]
+          })
+        });
+
+        if (response.ok) {
+          const responseText = await response.text();
+          const cleaned = responseText.trim();
+          
+          if (cleaned.startsWith("{")) {
+            const parsed = JSON.parse(cleaned);
+            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio || parsed.choices?.[0]?.message?.content;
+            if (base64Audio) {
+              const buffer = Buffer.from(base64Audio, "base64");
+              res.setHeader("Content-Type", "audio/mp3");
+              res.setHeader("X-TTS-Method", "Server-POST-Base64");
+              console.log(`[TTS Proxy] Sucesso via POST (Base64 JSON)`);
+              return res.send(buffer);
+            }
+          } else {
+            // Raw binary response
+            const buffer = Buffer.from(responseText, "binary");
+            res.setHeader("Content-Type", "audio/mp3");
+            res.setHeader("X-TTS-Method", "Server-POST-Binary");
+            console.log(`[TTS Proxy] Sucesso via POST (Raw Binary)`);
+            return res.send(buffer);
+          }
+        } else {
+          console.warn(`[TTS Proxy] POST falhou com status ${response.status}: ${response.statusText}`);
+        }
+      } catch (postErr: any) {
+        console.warn(`[TTS Proxy] POST erro:`, postErr.message);
+      }
+
+      // Método 2: GET fallback com model: openai-audio
+      try {
+        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai-audio&voice=${voice || "nova"}`;
+        console.log(`[TTS Proxy] Tentando GET fallback: ${url.substring(0, 80)}...`);
+        const response = await fetch(url);
+        if (response.ok) {
+          const responseBlob = await response.blob();
+          const arrayBuffer = await responseBlob.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          
+          const textVal = buffer.toString("utf-8");
+          if (textVal.trim().startsWith("{")) {
+            const parsed = JSON.parse(textVal);
+            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
+            if (base64Audio) {
+              const decodedBuffer = Buffer.from(base64Audio, "base64");
+              res.setHeader("Content-Type", "audio/mp3");
+              res.setHeader("X-TTS-Method", "Server-GET-Base64");
+              console.log(`[TTS Proxy] Sucesso via GET (Base64 JSON)`);
+              return res.send(decodedBuffer);
+            }
+          }
+          
+          res.setHeader("Content-Type", "audio/mp3");
+          res.setHeader("X-TTS-Method", "Server-GET-Raw");
+          console.log(`[TTS Proxy] Sucesso via GET (Raw Blob)`);
+          return res.send(buffer);
+        } else {
+          console.warn(`[TTS Proxy] GET falhou com status ${response.status}: ${response.statusText}`);
+        }
+      } catch (getErr: any) {
+        console.warn(`[TTS Proxy] GET erro:`, getErr.message);
+      }
+
+      // Método 3: GET fallback com model: openai (caso o openai-audio de GET retorne 404)
+      try {
+        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${voice || "nova"}`;
+        console.log(`[TTS Proxy] Tentando GET alternativa (model=openai): ${url.substring(0, 80)}...`);
+        const response = await fetch(url);
+        if (response.ok) {
+          const responseBlob = await response.blob();
+          const arrayBuffer = await responseBlob.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          
+          const textVal = buffer.toString("utf-8");
+          if (textVal.trim().startsWith("{")) {
+            const parsed = JSON.parse(textVal);
+            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
+            if (base64Audio) {
+              const decodedBuffer = Buffer.from(base64Audio, "base64");
+              res.setHeader("Content-Type", "audio/mp3");
+              res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Base64");
+              console.log(`[TTS Proxy] Sucesso via GET model=openai (Base64 JSON)`);
+              return res.send(decodedBuffer);
+            }
+          }
+          
+          res.setHeader("Content-Type", "audio/mp3");
+          res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Raw");
+          console.log(`[TTS Proxy] Sucesso via GET model=openai (Raw Blob)`);
+          return res.send(buffer);
+        } else {
+          console.warn(`[TTS Proxy] GET model=openai falhou com status ${response.status}`);
+        }
+      } catch (getOpenAiErr: any) {
+        console.warn(`[TTS Proxy] GET model=openai erro:`, getOpenAiErr.message);
+      }
+
+      return res.status(502).json({ error: "Todos os métodos de TTS falharam no proxy do servidor." });
+    } catch (err: any) {
+      console.error("[TTS Proxy] Erro crítico:", err);
+      res.status(500).json({ error: err.message || "Erro interno no servidor de TTS." });
+    }
+  });
+
   // Vite development / production handling
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
