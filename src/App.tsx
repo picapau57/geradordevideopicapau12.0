@@ -441,10 +441,24 @@ export default function App() {
         return { blob: responseBlob, method: "Pollinations GET Direto (Raw Blob)" };
       }
     } catch (err: any) {
-      throw new Error(`Ambos os métodos de TTS (Proxy e Chamada Direta) falharam. Erro final: ${err.message}`);
+      console.warn("Fallback client-side GET de pollinations falhou:", err);
     }
 
-    throw new Error("Não foi possível gerar a locução de voz.");
+    // Método de Fallback Direto Client-Side 3: Google Translate TTS direto
+    try {
+      const lang = "pt-BR";
+      const cleanText = text.replace(/[*_`~[\]#]/g, "").substring(0, 200);
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const responseBlob = await response.blob();
+        return { blob: responseBlob, method: "Google Translate TTS Direto" };
+      }
+    } catch (err: any) {
+      console.warn("Fallback client-side Google Translate TTS falhou:", err);
+    }
+
+    throw new Error("Não foi possível gerar a locução de voz em nenhum dos métodos.");
   };
 
   // Precise audio decoding and duration fetching using client-side AudioContext

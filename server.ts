@@ -221,6 +221,32 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
         console.warn(`[TTS Proxy] GET model=openai erro:`, getOpenAiErr.message);
       }
 
+      // Método 4: Fallback definitivo usando Google Translate TTS (super estável e rápido para português e inglês)
+      try {
+        const lang = "pt-BR"; // Como as histórias são em português do Brasil
+        const cleanText = text.replace(/[*_`~[\]#]/g, "").substring(0, 200); // Remove marcações markdown básicas
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+        console.log(`[TTS Proxy] Tentando fallback Google Translate TTS: ${url.substring(0, 80)}...`);
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        });
+        if (response.ok) {
+          const responseBlob = await response.blob();
+          const arrayBuffer = await responseBlob.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          res.setHeader("Content-Type", "audio/mp3");
+          res.setHeader("X-TTS-Method", "Server-Google-Translate");
+          console.log(`[TTS Proxy] Sucesso via Google Translate TTS!`);
+          return res.send(buffer);
+        } else {
+          console.warn(`[TTS Proxy] Google Translate TTS falhou com status ${response.status}`);
+        }
+      } catch (googleErr: any) {
+        console.warn(`[TTS Proxy] Google Translate TTS erro:`, googleErr.message);
+      }
+
       return res.status(502).json({ error: "Todos os métodos de TTS falharam no proxy do servidor." });
     } catch (err: any) {
       console.error("[TTS Proxy] Erro crítico:", err);
