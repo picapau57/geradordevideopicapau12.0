@@ -1218,7 +1218,6 @@ export default function App() {
       // Karaoke formatting: split text by space
       const words = text.split(/\s+/);
       const highlightedWords = words.slice(0, activeWordCount);
-      const highlightedText = highlightedWords.join(" ");
 
       // Wrap whole text to get line layout
       const lines = wrapCanvasText(ctx, text, maxTextWidth);
@@ -1226,35 +1225,44 @@ export default function App() {
       lines.forEach((line, lineIdx) => {
         const y = bottomY - (lines.length - 1 - lineIdx) * lineHeight;
         
-        // Draw black background stroke first
-        ctx.strokeStyle = "rgba(0,0,0,0.95)";
-        ctx.strokeText(line, W / 2, y);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(line, W / 2, y);
-
-        // Highlight karaoke words if they are on this line
-        const wordsOnThisLine = line.split(/\s+/);
-        let accumulatedText = "";
+        // Split line into words, removing empty elements
+        const wordsOnThisLine = line.trim().split(/\s+/).filter(Boolean);
         
-        // Find line's word offsets to highlight
-        let wordOffsetX = 0;
-        const totalLineWidth = ctx.measureText(line).width;
+        // Measure each word and space width
+        const wordWidths = wordsOnThisLine.map(w => ctx.measureText(w).width);
+        const spaceWidth = ctx.measureText(" ").width;
+        
+        // Total line width calculation
+        const totalLineWidth = wordWidths.reduce((sum, w) => sum + w, 0) + (wordsOnThisLine.length > 1 ? spaceWidth * (wordsOnThisLine.length - 1) : 0);
         let lineWordStart = W / 2 - totalLineWidth / 2;
+        
+        let wordOffsetX = 0;
 
-        wordsOnThisLine.forEach((w) => {
+        ctx.save();
+        ctx.textAlign = "left"; // Switch to left alignment for mathematically precise placement of individual words
+        
+        wordsOnThisLine.forEach((w, wIdx) => {
           // Check if this word is inside the highlightedWords list
           const isHighlighted = highlightedWords.some(hw => hw.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,"") === w.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,""));
           
           ctx.save();
+          // Draw black background stroke first
+          ctx.strokeStyle = "rgba(0,0,0,0.95)";
+          ctx.strokeText(w, lineWordStart + wordOffsetX, y);
+          
           if (isHighlighted) {
-            ctx.fillStyle = "#3b82f6"; // glowing blue
-            ctx.fillText(w, lineWordStart + wordOffsetX, y);
+            // High-contrast premium energetic yellow/gold (standard on Reels/Shorts/TikTok)
+            ctx.fillStyle = "#FACC15"; 
+          } else {
+            ctx.fillStyle = "#FFFFFF";
           }
+          ctx.fillText(w, lineWordStart + wordOffsetX, y);
           ctx.restore();
 
-          // Move cursor by word width plus space
-          wordOffsetX += ctx.measureText(w + " ").width;
+          // Move cursor by word width plus space width
+          wordOffsetX += wordWidths[wIdx] + spaceWidth;
         });
+        ctx.restore();
       });
     } else {
       // Standard subtitle
