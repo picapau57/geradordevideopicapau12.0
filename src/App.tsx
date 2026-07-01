@@ -453,7 +453,7 @@ export default function App() {
       console.warn("Fallback client-side POST falhou:", err);
     }
 
-    // Método de Fallback Direto Client-Side 2: GET fallback com model=openai
+    // Método de Fallback Direto Client-Side 2: GET fallback com model=openai (Apenas se retornar base64 válido)
     try {
       const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${finalVoice}`;
       const response = await fetch(url);
@@ -461,18 +461,21 @@ export default function App() {
         const responseBlob = await response.blob();
         const textVal = await responseBlob.text();
         if (textVal.trim().startsWith("{")) {
-          const parsed = JSON.parse(textVal);
-          const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
-          if (base64Audio) {
-            const binStr = window.atob(base64Audio);
-            const bytes = new Uint8Array(binStr.length);
-            for (let i = 0; i < binStr.length; i++) {
-              bytes[i] = binStr.charCodeAt(i);
+          try {
+            const parsed = JSON.parse(textVal);
+            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
+            if (base64Audio && base64Audio.length > 100) {
+              const binStr = window.atob(base64Audio);
+              const bytes = new Uint8Array(binStr.length);
+              for (let i = 0; i < binStr.length; i++) {
+                bytes[i] = binStr.charCodeAt(i);
+              }
+              return { blob: new Blob([bytes.buffer], { type: "audio/mp3" }), method: "Pollinations GET Direto (Base64 JSON)" };
             }
-            return { blob: new Blob([bytes.buffer], { type: "audio/mp3" }), method: "Pollinations GET Direto (Base64 JSON)" };
+          } catch (e) {
+            console.warn("Falha no parser JSON do GET direto");
           }
         }
-        return { blob: responseBlob, method: "Pollinations GET Direto (Raw Blob)" };
       }
     } catch (err: any) {
       console.warn("Fallback client-side GET de pollinations falhou:", err);
@@ -1560,9 +1563,12 @@ export default function App() {
                           onChange={(e) => setNumCenas(Number(e.target.value))}
                           className="w-full bg-[#0A0C10] border border-[#334155] rounded-lg p-2 text-xs text-white focus:outline-none"
                         >
-                          <option value={3}>3 Cenas (Rápido)</option>
-                          <option value={5}>5 Cenas (Médio)</option>
-                          <option value={8}>8 Cenas (Completo)</option>
+                          <option value={3}>3 Cenas (Curto)</option>
+                          <option value={5}>5 Cenas (Padrão)</option>
+                          <option value={8}>8 Cenas (Médio)</option>
+                          <option value={10}>10 Cenas (Longo)</option>
+                          <option value={13}>13 Cenas (Completo)</option>
+                          <option value={15}>15 Cenas (Máximo)</option>
                         </select>
                       </div>
                       

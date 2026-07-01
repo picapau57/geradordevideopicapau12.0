@@ -151,26 +151,35 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
         });
 
         if (response.ok) {
-          const responseText = await response.text();
-          const cleaned = responseText.trim();
+          const contentType = response.headers.get("content-type") || "";
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const firstBytes = buffer.toString("utf-8", 0, 100).trim();
           
-          if (cleaned.startsWith("{")) {
-            const parsed = JSON.parse(cleaned);
-            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio || parsed.choices?.[0]?.message?.content;
-            if (base64Audio) {
-              const buffer = Buffer.from(base64Audio, "base64");
-              res.setHeader("Content-Type", "audio/mp3");
-              res.setHeader("X-TTS-Method", "Server-POST-Base64");
-              console.log(`[TTS Proxy] Sucesso via POST (Base64 JSON)`);
-              return res.send(buffer);
+          if (firstBytes.startsWith("{")) {
+            try {
+              const parsed = JSON.parse(buffer.toString("utf-8"));
+              const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio || parsed.choices?.[0]?.message?.content;
+              if (base64Audio && base64Audio.length > 100) {
+                const audioBuffer = Buffer.from(base64Audio, "base64");
+                res.setHeader("Content-Type", "audio/mp3");
+                res.setHeader("X-TTS-Method", "Server-POST-Base64");
+                console.log(`[TTS Proxy] Sucesso via POST (Base64 JSON)`);
+                return res.send(audioBuffer);
+              }
+            } catch (e) {
+              console.warn("[TTS Proxy] Falha ao fazer parse de JSON na resposta POST");
             }
-          } else {
-            // Raw binary response
-            const buffer = Buffer.from(responseText, "binary");
+          }
+
+          const looksLikeText = /^[A-Za-z0-9\s.,!?;:"'()\-áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]+$/.test(firstBytes.substring(0, 40));
+          if (contentType.includes("audio") || contentType.includes("octet-stream") || (!looksLikeText && buffer.length > 500)) {
             res.setHeader("Content-Type", "audio/mp3");
             res.setHeader("X-TTS-Method", "Server-POST-Binary");
             console.log(`[TTS Proxy] Sucesso via POST (Raw Binary)`);
             return res.send(buffer);
+          } else {
+            console.warn(`[TTS Proxy] POST retornou texto/html em vez de áudio: "${firstBytes.substring(0, 60)}"`);
           }
         } else {
           console.warn(`[TTS Proxy] POST falhou com status ${response.status}: ${response.statusText}`);
@@ -179,33 +188,42 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
         console.warn(`[TTS Proxy] POST erro:`, postErr.message);
       }
 
-      // Método 2: GET fallback com model: openai-audio
+      // Método 2: GET fallback com model: openai-audio (Apenas se retornar áudio real ou base64)
       try {
         const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai-audio&voice=${finalVoice}`;
         console.log(`[TTS Proxy] Tentando GET fallback: ${url.substring(0, 80)}...`);
         const response = await fetch(url);
         if (response.ok) {
-          const responseBlob = await response.blob();
-          const arrayBuffer = await responseBlob.arrayBuffer();
+          const contentType = response.headers.get("content-type") || "";
+          const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
+          const firstBytes = buffer.toString("utf-8", 0, 100).trim();
           
-          const textVal = buffer.toString("utf-8");
-          if (textVal.trim().startsWith("{")) {
-            const parsed = JSON.parse(textVal);
-            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
-            if (base64Audio) {
-              const decodedBuffer = Buffer.from(base64Audio, "base64");
-              res.setHeader("Content-Type", "audio/mp3");
-              res.setHeader("X-TTS-Method", "Server-GET-Base64");
-              console.log(`[TTS Proxy] Sucesso via GET (Base64 JSON)`);
-              return res.send(decodedBuffer);
+          if (firstBytes.startsWith("{")) {
+            try {
+              const parsed = JSON.parse(buffer.toString("utf-8"));
+              const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
+              if (base64Audio && base64Audio.length > 100) {
+                const decodedBuffer = Buffer.from(base64Audio, "base64");
+                res.setHeader("Content-Type", "audio/mp3");
+                res.setHeader("X-TTS-Method", "Server-GET-Base64");
+                console.log(`[TTS Proxy] Sucesso via GET (Base64 JSON)`);
+                return res.send(decodedBuffer);
+              }
+            } catch (e) {
+              console.warn("[TTS Proxy] Falha ao fazer parse de JSON na resposta GET");
             }
           }
           
-          res.setHeader("Content-Type", "audio/mp3");
-          res.setHeader("X-TTS-Method", "Server-GET-Raw");
-          console.log(`[TTS Proxy] Sucesso via GET (Raw Blob)`);
-          return res.send(buffer);
+          const looksLikeText = /^[A-Za-z0-9\s.,!?;:"'()\-áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]+$/.test(firstBytes.substring(0, 40));
+          if (contentType.includes("audio") || contentType.includes("octet-stream") || (!looksLikeText && buffer.length > 500)) {
+            res.setHeader("Content-Type", "audio/mp3");
+            res.setHeader("X-TTS-Method", "Server-GET-Raw");
+            console.log(`[TTS Proxy] Sucesso via GET (Raw Blob)`);
+            return res.send(buffer);
+          } else {
+            console.warn(`[TTS Proxy] GET retornou texto/html em vez de áudio: "${firstBytes.substring(0, 60)}"`);
+          }
         } else {
           console.warn(`[TTS Proxy] GET falhou com status ${response.status}: ${response.statusText}`);
         }
@@ -219,27 +237,36 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
         console.log(`[TTS Proxy] Tentando GET alternativa (model=openai): ${url.substring(0, 80)}...`);
         const response = await fetch(url);
         if (response.ok) {
-          const responseBlob = await response.blob();
-          const arrayBuffer = await responseBlob.arrayBuffer();
+          const contentType = response.headers.get("content-type") || "";
+          const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
+          const firstBytes = buffer.toString("utf-8", 0, 100).trim();
           
-          const textVal = buffer.toString("utf-8");
-          if (textVal.trim().startsWith("{")) {
-            const parsed = JSON.parse(textVal);
-            const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
-            if (base64Audio) {
-              const decodedBuffer = Buffer.from(base64Audio, "base64");
-              res.setHeader("Content-Type", "audio/mp3");
-              res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Base64");
-              console.log(`[TTS Proxy] Sucesso via GET model=openai (Base64 JSON)`);
-              return res.send(decodedBuffer);
+          if (firstBytes.startsWith("{")) {
+            try {
+              const parsed = JSON.parse(buffer.toString("utf-8"));
+              const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
+              if (base64Audio && base64Audio.length > 100) {
+                const decodedBuffer = Buffer.from(base64Audio, "base64");
+                res.setHeader("Content-Type", "audio/mp3");
+                res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Base64");
+                console.log(`[TTS Proxy] Sucesso via GET model=openai (Base64 JSON)`);
+                return res.send(decodedBuffer);
+              }
+            } catch (e) {
+              console.warn("[TTS Proxy] Falha ao fazer parse de JSON na resposta GET alternativa");
             }
           }
           
-          res.setHeader("Content-Type", "audio/mp3");
-          res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Raw");
-          console.log(`[TTS Proxy] Sucesso via GET model=openai (Raw Blob)`);
-          return res.send(buffer);
+          const looksLikeText = /^[A-Za-z0-9\s.,!?;:"'()\-áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]+$/.test(firstBytes.substring(0, 40));
+          if (contentType.includes("audio") || contentType.includes("octet-stream") || (!looksLikeText && buffer.length > 500)) {
+            res.setHeader("Content-Type", "audio/mp3");
+            res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Raw");
+            console.log(`[TTS Proxy] Sucesso via GET model=openai (Raw Blob)`);
+            return res.send(buffer);
+          } else {
+            console.warn(`[TTS Proxy] GET alternativa retornou texto/html em vez de áudio: "${firstBytes.substring(0, 60)}"`);
+          }
         } else {
           console.warn(`[TTS Proxy] GET model=openai falhou com status ${response.status}`);
         }
