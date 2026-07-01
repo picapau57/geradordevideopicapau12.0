@@ -108,173 +108,88 @@ Retorne os dados estritamente no formato JSON estruturado solicitado.`,
         return res.status(400).json({ error: "Falta o parâmetro text" });
       }
 
-      // Resolve custom voices to standard OpenAI voice IDs and inject vocal style prefixes
-      let finalVoice = voice || "nova";
-      let extraEmo = "";
-      
-      if (voice === "coral") {
-        finalVoice = "shimmer";
-        extraEmo = "[com voz jovem, alegre e entusiasmada]";
-      } else if (voice === "melody") {
-        finalVoice = "nova";
-        extraEmo = "[com voz doce, carismática e suave]";
-      } else if (voice === "stella") {
-        finalVoice = "shimmer";
-        extraEmo = "[com voz sofisticada, pausada e elegante]";
-      } else if (voice === "ash") {
-        finalVoice = "echo";
-        extraEmo = "[com voz jovem, casual e amigável]";
-      } else if (voice === "cove") {
-        finalVoice = "onyx";
-        extraEmo = "[com voz calorosa, calma e acolhedora]";
-      } else if (voice === "breeze") {
-        finalVoice = "echo";
-        extraEmo = "[com voz enérgica, forte e motivadora]";
+      // Map custom voice IDs to Gemini TTS prebuilt voices
+      // Gemini Prebuilt Voices: 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'
+      let geminiVoice = "Kore"; // Default female voice
+      let voiceDescription = "";
+
+      // Handle raw and pre-mapped voices
+      const voiceLower = (voice || "nova").toLowerCase();
+      if (voiceLower === "echo" || voiceLower === "breeze") {
+        geminiVoice = "Zephyr";
+        voiceDescription = "Diga com voz enérgica, firme, confiável e ponderada: ";
+      } else if (voiceLower === "onyx" || voiceLower === "cove") {
+        geminiVoice = "Fenrir";
+        voiceDescription = "Diga com voz grave, profunda, calorosa, calma e acolhedora: ";
+      } else if (voiceLower === "ash") {
+        geminiVoice = "Puck";
+        voiceDescription = "Diga com voz jovem, casual e amigável: ";
+      } else if (voiceLower === "shimmer" || voiceLower === "coral" || voiceLower === "stella") {
+        geminiVoice = "Kore";
+        voiceDescription = "Diga com voz suave, calma, alegre e entusiasmada: ";
+      } else if (voiceLower === "nova" || voiceLower === "melody") {
+        geminiVoice = "Kore";
+        voiceDescription = "Diga com voz clara, energética e expressiva: ";
+      } else if (voiceLower === "alloy") {
+        geminiVoice = "Zephyr";
+        voiceDescription = "Diga com voz equilibrada, profissional e limpa: ";
+      } else if (voiceLower === "fable") {
+        geminiVoice = "Charon";
+        voiceDescription = "Diga de forma narrativa, misteriosa e artística: ";
       }
 
-      const combinedEmo = emo ? (extraEmo ? `${extraEmo} ${emo}` : emo) : extraEmo;
-      const fullText = combinedEmo ? `${combinedEmo} ${text}` : text;
+      let extraInstruction = "";
+      if (emo) {
+        extraInstruction = `[Estilo emocional: falar de forma ${emo}] `;
+      }
 
-      console.log(`[TTS Proxy] Iniciando para: "${fullText.substring(0, 40)}..." | Voz: ${finalVoice}`);
+      const fullPrompt = `${voiceDescription}${extraInstruction}"${text}"`;
+      console.log(`[TTS Proxy] Iniciando Gemini TTS para: "${text.substring(0, 40)}..." | Voz: ${geminiVoice}`);
 
-      // Método 1: POST para text.pollinations.ai/openai com model: openai-audio
+      // Método 1: Gemini TTS de Alta Qualidade e Livre de Limites de IP
       try {
-        const response = await fetch("https://text.pollinations.ai/openai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: fullText }],
-            model: "openai-audio",
-            voice: finalVoice,
-            response_modalities: ["audio"]
-          })
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+          throw new Error("GEMINI_API_KEY não configurada.");
+        }
+
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
         });
 
-        if (response.ok) {
-          const contentType = response.headers.get("content-type") || "";
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const firstBytes = buffer.toString("utf-8", 0, 100).trim();
-          
-          if (firstBytes.startsWith("{")) {
-            try {
-              const parsed = JSON.parse(buffer.toString("utf-8"));
-              const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio || parsed.choices?.[0]?.message?.content;
-              if (base64Audio && base64Audio.length > 100) {
-                const audioBuffer = Buffer.from(base64Audio, "base64");
-                res.setHeader("Content-Type", "audio/mp3");
-                res.setHeader("X-TTS-Method", "Server-POST-Base64");
-                console.log(`[TTS Proxy] Sucesso via POST (Base64 JSON)`);
-                return res.send(audioBuffer);
+        const response = await ai.models.generateContent({
+          model: "gemini-3.1-flash-tts-preview",
+          contents: [{ parts: [{ text: fullPrompt }] }],
+          config: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: geminiVoice }
               }
-            } catch (e) {
-              console.warn("[TTS Proxy] Falha ao fazer parse de JSON na resposta POST");
             }
           }
+        });
 
-          const looksLikeText = /^[A-Za-z0-9\s.,!?;:"'()\-áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]+$/.test(firstBytes.substring(0, 40));
-          if (contentType.includes("audio") || contentType.includes("octet-stream") || (!looksLikeText && buffer.length > 500)) {
-            res.setHeader("Content-Type", "audio/mp3");
-            res.setHeader("X-TTS-Method", "Server-POST-Binary");
-            console.log(`[TTS Proxy] Sucesso via POST (Raw Binary)`);
-            return res.send(buffer);
-          } else {
-            console.warn(`[TTS Proxy] POST retornou texto/html em vez de áudio: "${firstBytes.substring(0, 60)}"`);
-          }
+        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (base64Audio && base64Audio.length > 100) {
+          const audioBuffer = Buffer.from(base64Audio, "base64");
+          res.setHeader("Content-Type", "audio/wav"); // O Gemini TTS retorna arquivo WAV nativo de alta qualidade (24kHz)
+          res.setHeader("X-TTS-Method", `Server-Gemini-TTS-${geminiVoice}`);
+          console.log(`[TTS Proxy] Sucesso via Gemini TTS (${geminiVoice})`);
+          return res.send(audioBuffer);
         } else {
-          console.warn(`[TTS Proxy] POST falhou com status ${response.status}: ${response.statusText}`);
+          console.warn("[TTS Proxy] Resposta do Gemini TTS não continha dados de áudio válidos.");
         }
-      } catch (postErr: any) {
-        console.warn(`[TTS Proxy] POST erro:`, postErr.message);
+      } catch (geminiErr: any) {
+        console.warn(`[TTS Proxy] Gemini TTS falhou ou não configurado, recorrendo a fallbacks:`, geminiErr.message);
       }
 
-      // Método 2: GET fallback com model: openai-audio (Apenas se retornar áudio real ou base64)
-      try {
-        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai-audio&voice=${finalVoice}`;
-        console.log(`[TTS Proxy] Tentando GET fallback: ${url.substring(0, 80)}...`);
-        const response = await fetch(url);
-        if (response.ok) {
-          const contentType = response.headers.get("content-type") || "";
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const firstBytes = buffer.toString("utf-8", 0, 100).trim();
-          
-          if (firstBytes.startsWith("{")) {
-            try {
-              const parsed = JSON.parse(buffer.toString("utf-8"));
-              const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
-              if (base64Audio && base64Audio.length > 100) {
-                const decodedBuffer = Buffer.from(base64Audio, "base64");
-                res.setHeader("Content-Type", "audio/mp3");
-                res.setHeader("X-TTS-Method", "Server-GET-Base64");
-                console.log(`[TTS Proxy] Sucesso via GET (Base64 JSON)`);
-                return res.send(decodedBuffer);
-              }
-            } catch (e) {
-              console.warn("[TTS Proxy] Falha ao fazer parse de JSON na resposta GET");
-            }
-          }
-          
-          const looksLikeText = /^[A-Za-z0-9\s.,!?;:"'()\-áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]+$/.test(firstBytes.substring(0, 40));
-          if (contentType.includes("audio") || contentType.includes("octet-stream") || (!looksLikeText && buffer.length > 500)) {
-            res.setHeader("Content-Type", "audio/mp3");
-            res.setHeader("X-TTS-Method", "Server-GET-Raw");
-            console.log(`[TTS Proxy] Sucesso via GET (Raw Blob)`);
-            return res.send(buffer);
-          } else {
-            console.warn(`[TTS Proxy] GET retornou texto/html em vez de áudio: "${firstBytes.substring(0, 60)}"`);
-          }
-        } else {
-          console.warn(`[TTS Proxy] GET falhou com status ${response.status}: ${response.statusText}`);
-        }
-      } catch (getErr: any) {
-        console.warn(`[TTS Proxy] GET erro:`, getErr.message);
-      }
-
-      // Método 3: GET fallback com model: openai (caso o openai-audio de GET retorne 404)
-      try {
-        const url = `https://text.pollinations.ai/${encodeURIComponent(fullText)}?model=openai&voice=${finalVoice}`;
-        console.log(`[TTS Proxy] Tentando GET alternativa (model=openai): ${url.substring(0, 80)}...`);
-        const response = await fetch(url);
-        if (response.ok) {
-          const contentType = response.headers.get("content-type") || "";
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const firstBytes = buffer.toString("utf-8", 0, 100).trim();
-          
-          if (firstBytes.startsWith("{")) {
-            try {
-              const parsed = JSON.parse(buffer.toString("utf-8"));
-              const base64Audio = parsed.choices?.[0]?.message?.audio?.data || parsed.audio;
-              if (base64Audio && base64Audio.length > 100) {
-                const decodedBuffer = Buffer.from(base64Audio, "base64");
-                res.setHeader("Content-Type", "audio/mp3");
-                res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Base64");
-                console.log(`[TTS Proxy] Sucesso via GET model=openai (Base64 JSON)`);
-                return res.send(decodedBuffer);
-              }
-            } catch (e) {
-              console.warn("[TTS Proxy] Falha ao fazer parse de JSON na resposta GET alternativa");
-            }
-          }
-          
-          const looksLikeText = /^[A-Za-z0-9\s.,!?;:"'()\-áéíóúâêîôûãõçÁÉÍÓÚÂÊÎÔÛÃÕÇ]+$/.test(firstBytes.substring(0, 40));
-          if (contentType.includes("audio") || contentType.includes("octet-stream") || (!looksLikeText && buffer.length > 500)) {
-            res.setHeader("Content-Type", "audio/mp3");
-            res.setHeader("X-TTS-Method", "Server-GET-OpenAI-Raw");
-            console.log(`[TTS Proxy] Sucesso via GET model=openai (Raw Blob)`);
-            return res.send(buffer);
-          } else {
-            console.warn(`[TTS Proxy] GET alternativa retornou texto/html em vez de áudio: "${firstBytes.substring(0, 60)}"`);
-          }
-        } else {
-          console.warn(`[TTS Proxy] GET model=openai falhou com status ${response.status}`);
-        }
-      } catch (getOpenAiErr: any) {
-        console.warn(`[TTS Proxy] GET model=openai erro:`, getOpenAiErr.message);
-      }
-
-      // Método 4: Fallback definitivo usando Google Translate TTS (super estável e rápido para português e inglês)
+      // Método 2: Fallback definitivo usando Google Translate TTS (super estável e rápido para português)
       try {
         const lang = "pt-BR"; // Como as histórias são em português do Brasil
         const cleanText = text.replace(/[*_`~[\]#]/g, "").substring(0, 200); // Remove marcações markdown básicas
